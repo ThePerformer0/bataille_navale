@@ -45,7 +45,7 @@ class Game:
         # Il faut que target_player soit une instance de AIPlayer pour cette logique
         if isinstance(target_player, AIPlayer):
             # La méthode `AIPlayer.analyze_opponent_shot` n'existe pas encore, nous allons la créer.
-            target_player.analyze_opponent_shot(shot_coord, result)
+            target_player.process_shot_result(shot_coord, result)
 
         # NOUVEAU : Informer l'IA de son résultat de tir si c'est elle qui tire
         if isinstance(player_shooting, AIPlayer):

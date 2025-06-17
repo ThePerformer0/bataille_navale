@@ -1,6 +1,6 @@
 from .ship import Ship
 from .utils import get_coordinates, is_valid_ship_placement
-from typing import Tuple
+from typing import List, Tuple
 
 class Board:
     """
@@ -31,50 +31,52 @@ class Board:
         self.ships = []  # Liste des objets Ship sur ce plateau
         self.name = name
 
-    def display(self, hide_ships=False):
+    def display(self, hide_ships: bool = True):
         """
         Affiche le plateau de jeu dans la console.
 
         Args:
-            hide_ships (bool): Si True, cache les positions des navires ('S')
-                               pour l'affichage du plateau de l'adversaire.
+            hide_ships (bool): Si True, cache la position des navires non touchés ('S').
         """
-        print(f"\n--- Plateau de {self.name} ---")
-        # Affichage des en-têtes de colonnes (A, B, C...)
+        # Afficher les en-têtes de colonnes (A, B, C...)
         print("  " + " ".join([chr(65 + i) for i in range(self.size)]))
-
         for r in range(self.size):
-            # Affichage des numéros de ligne (1, 2, 3...)
-            row_display = f"{r + 1:<2}" # <2 pour aligner à gauche sur 2 caractères
+            # Afficher le numéro de ligne (1, 2, 3...)
+            row_display = [str(r + 1).ljust(2)] # Ajuste pour l'alignement
             for c in range(self.size):
                 cell = self.grid[r][c]
                 if hide_ships and cell == 'S':
-                    row_display += '~ '  # Cache les navires pour l'adversaire
+                    row_display.append('~') # Cache les navires non touchés
                 else:
-                    row_display += f"{cell} "
-            print(row_display)
-        print("-" * (self.size * 2 + 5)) # Ligne de séparation
-        
-        
-    def place_ship(self, ship: Ship, start_coord: Tuple[int, int], orientation: str) -> bool:
+                    row_display.append(cell)
+            print(" ".join(row_display))
+
+    def place_ship(self, ship, start_coord: Tuple[int, int], orientation: str) -> bool:
         """
         Tente de placer un navire sur le plateau.
+
+        Args:
+            ship (Ship): L'objet Ship à placer.
+            start_coord (tuple): Les coordonnées (row, col) de la première case du navire.
+            orientation (str): 'H' pour horizontal, 'V' pour vertical.
+
+        Returns:
+            bool: True si le navire a été placé avec succès, False sinon.
         """
-        # Utiliser la fonction utilitaire améliorée pour obtenir et valider les coordonnées
         potential_coords = is_valid_ship_placement(self, start_coord, ship.length, orientation)
 
         if potential_coords is None:
             return False # Placement invalide (hors limites ou chevauchement)
 
-        # Si valide, placer le navire
+        # Si le placement est valide, mettre à jour la grille et le navire
         for r, c in potential_coords:
-            self.grid[r][c] = 'S' # Marque la case comme occupée par un navire
-
+            self.grid[r][c] = 'S'
+        
         ship.coordinates = potential_coords # Associe les coordonnées au navire
-        self.ships.append(ship) # Ajoute le navire à la liste des navires sur ce plateau
+        self.ships.append(ship) # Ajoute le navire à la liste des navires du plateau
         return True
 
-    def receive_shot(self, shot_coord: tuple) -> str:
+    def receive_shot(self, shot_coord: Tuple[int, int]) -> str:
         """
         Gère un tir reçu à une coordonnée donnée.
 
@@ -103,7 +105,7 @@ class Board:
                     break
             
             if hit_ship and hit_ship.is_sunk():
-                print(f"Vous avez coulé le {hit_ship.name} de {self.name} !")
+                # print(f"Vous avez coulé le {hit_ship.name} de {self.name} !") # Laisser la GUI gérer ça
                 return "sunk"
             else:
                 return "hit"
@@ -111,6 +113,18 @@ class Board:
             # C'est de l'eau
             self.grid[r][c] = 'O' # 'O' pour manqué
             return "miss"
-        elif cell_content == 'X' or cell_content == 'O':
-            # Case déjà touchée ou manquée
-            return "already_hit" # Ou "invalid" pour signifier un coup redondant
+        else:
+            # Déjà tiré ici ('X' ou 'O')
+            return "already_hit"
+
+    def get_all_shot_coords(self) -> List[Tuple[int, int]]:
+        """
+        Retourne une liste de toutes les coordonnées qui ont été ciblées sur ce plateau
+        (qu'il y ait eu un coup ('X') ou un manqué ('O')).
+        """
+        shot_coords = []
+        for r in range(self.size):
+            for c in range(self.size):
+                if self.grid[r][c] == 'X' or self.grid[r][c] == 'O':
+                    shot_coords.append((r, c))
+        return shot_coords
