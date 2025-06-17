@@ -1,0 +1,18 @@
+# Environnement virtuel Python
+venv/
+
+# Fichiers de cache Python
+__pycache__/
+*.pyc
+*.pyd
+.Python
+.pytest_cache/
+
+# Fichiers spécifiques aux IDE (facultatif, si tu utilises VS Code par exemple)
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.idea/
+
+# Logs
+*.log
