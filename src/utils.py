@@ -1,61 +1,48 @@
-from typing import Union
+from typing import Tuple, List, Optional
 
-def get_coordinates(input_str: str, board_size: int) -> Union[tuple, None]:
+def get_coordinates(input_str: str, board_size: int) -> Optional[Tuple[int, int]]:
     """
-    Convertit une chaîne de caractères de coordonnées (ex: "A1", "J10") en un tuple (row, col).
-    Valide également si les coordonnées sont dans les limites du plateau.
-
-    Args:
-        input_str (str): La chaîne de caractères représentant les coordonnées.
-        board_size (int): La taille du plateau de jeu (ex: 10).
-
-    Returns:
-        tuple | None: Un tuple (row, col) si les coordonnées sont valides, sinon None.
+    Convertit une chaîne de caractères (ex: "A1") en coordonnées (row, col).
     """
-    input_str = input_str.upper().strip()
-
-    if not (1 < len(input_str) <= 3): # Ex: A1, B10
+    if len(input_str) < 2:
         return None
 
-    # Extrait la colonne (lettre) et la ligne (chiffres)
-    col_char = input_str[0]
+    col_str = input_str[0].upper()
     try:
-        row_str = input_str[1:]
-        row = int(row_str) - 1 # Convertit la ligne en index 0-basé
+        col = ord(col_str) - ord('A')
+        row = int(input_str[1:]) - 1
     except ValueError:
         return None
 
-    # Convertit la lettre de colonne en index 0-basé (A=0, B=1, ...)
-    col = ord(col_char) - ord('A')
-
-    # Vérifie si les coordonnées sont dans les limites du plateau
-    if not (0 <= row < board_size and 0 <= col < board_size):
+    if 0 <= row < board_size and 0 <= col < board_size:
+        return (row, col)
+    else:
         return None
 
-    return (row, col)
-
-def is_valid_ship_placement(board_grid: list, ship_coords: list, board_size: int) -> bool:
+def is_valid_ship_placement(board, start_coord: Tuple[int, int], ship_length: int, orientation: str) -> List[Tuple[int, int]]:
     """
-    Vérifie si un placement de navire est valide sur la grille.
-    Un placement est valide si:
-    1. Toutes les coordonnées sont dans les limites du plateau.
-    2. Aucune des coordonnées ne chevauche un navire existant ('S' ou 'X').
-
-    Args:
-        board_grid (list): La grille actuelle du plateau.
-        ship_coords (list): La liste des tuples (row, col) que le navire occuperait.
-        board_size (int): La taille du plateau.
-
-    Returns:
-        bool: True si le placement est valide, False sinon.
+    Vérifie si un navire peut être placé à partir des coordonnées de départ et de l'orientation.
+    Retourne la liste des coordonnées du navire si valide, sinon None.
+    Modifié pour prendre le plateau et vérifier les chevauchements.
     """
-    for r, c in ship_coords:
-        # 1. Vérifier si les coordonnées sont dans les limites du plateau (redondant si get_coordinates est bien utilisé, mais bonne sécurité)
-        if not (0 <= r < board_size and 0 <= c < board_size):
-            print(f"DEBUG: Coordonnées hors limites: ({r}, {c})") # Pour le débogage
-            return False
-        # 2. Vérifier si la case est déjà occupée par un navire ('S') ou une partie touchée ('X')
-        if board_grid[r][c] == 'S' or board_grid[r][c] == 'X':
-            print(f"DEBUG: Chevauchement à ({r}, {c})") # Pour le débogage
-            return False
-    return True
+    r_start, c_start = start_coord
+    ship_coords = []
+
+    for i in range(ship_length):
+        if orientation == 'H':
+            r, c = r_start, c_start + i
+        else: # 'V'
+            r, c = r_start + i, c_start
+
+        # Vérifier si les coordonnées sont dans les limites du plateau
+        if not (0 <= r < board.size and 0 <= c < board.size):
+            return None # Hors limites
+
+        # NOUVEAU : Vérifier si la case est déjà occupée par un autre navire ('S' ou 'X' pour touché)
+        # Note: Un navire coulé ('X') doit aussi être considéré comme occupé pour un nouveau placement
+        if board.grid[r][c] == 'S' or board.grid[r][c] == 'X':
+            return None # Case déjà occupée
+
+        ship_coords.append((r, c))
+
+    return ship_coords # Retourne la liste des coordonnées si tout est valide

@@ -31,58 +31,80 @@ class Game:
         """
         Traite un tir effectué par un joueur sur un autre.
         Met à jour les plateaux et gère le résultat du tir.
-
-        Args:
-            player_shooting (Player): Le joueur qui effectue le tir.
-            target_player (Player): Le joueur dont le plateau est ciblé.
-            shot_coord (Tuple[int, int]): Les coordonnées du tir.
-
-        Returns:
-            str: Le résultat du tir ('miss', 'hit', 'sunk', 'already_hit', 'invalid').
         """
-        # Le plateau de l'adversaire reçoit le tir
+        # ... (le code existant pour le traitement du tir et mise à jour de target_board) ...
         result = target_player.own_board.receive_shot(shot_coord)
 
-        # Le tireur met à jour son propre plateau de cible en fonction du résultat
         r, c = shot_coord
         if result == 'hit' or result == 'sunk':
             player_shooting.target_board.grid[r][c] = 'X'
         elif result == 'miss':
             player_shooting.target_board.grid[r][c] = 'O'
-        # Si 'already_hit' ou 'invalid', le board n'est pas mis à jour par le tireur (il doit resaisir)
-        
+
+        # Informer le joueur adverse du tir qu'il a reçu
+        # Il faut que target_player soit une instance de AIPlayer pour cette logique
+        if isinstance(target_player, AIPlayer):
+            # La méthode `AIPlayer.analyze_opponent_shot` n'existe pas encore, nous allons la créer.
+            target_player.analyze_opponent_shot(shot_coord, result)
+
+        # NOUVEAU : Informer l'IA de son résultat de tir si c'est elle qui tire
+        if isinstance(player_shooting, AIPlayer):
+            player_shooting.process_shot_result(shot_coord, result)
+            
         return result
 
     def start_game(self):
         """
-        Démarre la boucle principale du jeu.
+        Démarre et gère le déroulement de la partie.
         """
-        print("Bienvenue à la Bataille Navale !")
+        print("Début de la partie de Bataille Navale !")
 
-        # 1. Placement des navires
+        # Placement des navires
         self.player_human.place_ships()
         self.player_ai.place_ships()
-
-        print("\n--- Tous les navires sont placés ! La bataille commence ! ---")
         
+        # NOUVEAU : Informer l'IA de ses propres placements pour ne pas tirer dessus
+        if isinstance(self.player_ai, AIPlayer):
+            self.player_ai.update_untried_coordinates_after_placement()
+
+
+        print("\\nTous les navires sont placés. La partie commence !")
+        input("Appuyez sur Entrée pour continuer...")
+
         # Boucle de jeu principale
         while not self.player_human.has_lost() and not self.player_ai.has_lost():
             
             self.current_player.display_boards() # Afficher les plateaux du joueur actuel
 
             shot_coord = None
-            result = "invalid" # Initialiser avec une valeur qui garantit une première tentative
+            result = "invalid" 
             
-            # Boucle pour s'assurer d'un tir valide (pas déjà tiré, pas hors limites)
+            if isinstance(self.current_player, AIPlayer):
+                # Passer les HP restants de l'adversaire (le joueur humain) à l'IA
+                opponent_remaining_hp = self.opponent_player.get_remaining_ship_hp()
+                shot_coord = self.current_player.get_shot_coordinates(opponent_remaining_hp=opponent_remaining_hp)
+            else: # Joueur humain
+                shot_coord = self.current_player.get_shot_coordinates()
+
+            # Boucle pour s'assurer d'un tir valide
             while result == "invalid" or result == "already_hit":
                 try:
-                    shot_coord = self.current_player.get_shot_coordinates()
+                    # Le tir a déjà été obtenu ci-dessus, on l'utilise directement ici
+                    if shot_coord is None: # Si get_shot_coordinates a retourné None (devrait pas arriver avec l'IA)
+                         raise ValueError("Coordonnées de tir non obtenues.")
+
                     result = self._process_shot(self.current_player, self.opponent_player, shot_coord)
                     
                     if result == "invalid":
                         print("Coordonnées de tir invalides ou hors limites. Réessayez.")
+                        # Pour l'IA, si elle a tiré invalide, cela ne devrait pas arriver après filtrage.
+                        # Pour l'humain, il faut redemander.
+                        if not isinstance(self.current_player, AIPlayer):
+                            shot_coord = self.current_player.get_shot_coordinates() # Redemander à l'humain
                     elif result == "already_hit":
                         print("Vous avez déjà tiré à cet endroit. Réessayez.")
+                        if not isinstance(self.current_player, AIPlayer):
+                            shot_coord = self.current_player.get_shot_coordinates() # Redemander à l'humain
                     
                 except Exception as e:
                     print(f"Une erreur est survenue lors de la saisie du tir : {e}. Réessayez.")

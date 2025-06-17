@@ -1,5 +1,6 @@
 from .ship import Ship
 from .utils import get_coordinates, is_valid_ship_placement
+from typing import Tuple
 
 class Board:
     """
@@ -55,44 +56,22 @@ class Board:
         print("-" * (self.size * 2 + 5)) # Ligne de séparation
         
         
-    def place_ship(self, ship: Ship, start_coord: tuple, orientation: str) -> bool:
+    def place_ship(self, ship: Ship, start_coord: Tuple[int, int], orientation: str) -> bool:
         """
         Tente de placer un navire sur le plateau.
-
-        Args:
-            ship (Ship): L'objet Ship à placer.
-            start_coord (tuple): Les coordonnées (row, col) de départ du navire.
-            orientation (str): 'H' pour horizontal, 'V' pour vertical.
-
-        Returns:
-            bool: True si le navire a été placé avec succès, False sinon.
         """
-        row_start, col_start = start_coord
-        ship_coordinates = []
+        # Utiliser la fonction utilitaire améliorée pour obtenir et valider les coordonnées
+        potential_coords = is_valid_ship_placement(self, start_coord, ship.length, orientation)
 
-        # Calcul des coordonnées occupées par le navire
-        for i in range(ship.length):
-            if orientation.upper() == 'H': # Horizontal
-                current_row = row_start
-                current_col = col_start + i
-            elif orientation.upper() == 'V': # Vertical
-                current_row = row_start + i
-                current_col = col_start
-            else:
-                print("Orientation invalide. Utilisez 'H' ou 'V'.")
-                return False
-            ship_coordinates.append((current_row, current_col))
+        if potential_coords is None:
+            return False # Placement invalide (hors limites ou chevauchement)
 
-        # Vérifier la validité du placement avant de modifier la grille
-        if not is_valid_ship_placement(self.grid, ship_coordinates, self.size):
-            print("Placement impossible : chevauchement ou hors limites.")
-            return False
+        # Si valide, placer le navire
+        for r, c in potential_coords:
+            self.grid[r][c] = 'S' # Marque la case comme occupée par un navire
 
-        # Si le placement est valide, mettre à jour la grille et les coordonnées du navire
-        for r, c in ship_coordinates:
-            self.grid[r][c] = 'S' # Marque la cellule comme occupée par un navire
-        ship.coordinates = ship_coordinates # Met à jour les coordonnées dans l'objet Ship
-        self.ships.append(ship) # Ajoute le navire à la liste des navires du plateau
+        ship.coordinates = potential_coords # Associe les coordonnées au navire
+        self.ships.append(ship) # Ajoute le navire à la liste des navires sur ce plateau
         return True
 
     def receive_shot(self, shot_coord: tuple) -> str:
