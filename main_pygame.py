@@ -1,380 +1,305 @@
-# main_pygame.py
-
 import pygame
 import sys
+import random
 import os
-from typing import Tuple, List, Optional
-
-# Importe tes classes existantes
-from src.game import Game
-from src.human_player import HumanPlayer
 from src.ai_player import AIPlayer
-from src.board import Board
-from src.utils import get_coordinates
 
-# --- Constantes Pygame ---
-SCREEN_WIDTH = 1000
-SCREEN_HEIGHT = 700
-SCREEN_TITLE = "Bataille Navale - Pygame Edition"
+# Constantes
+GRID_SIZE = 10
+CELL_SIZE = 40
+MARGIN = 30
+GRID_GAP = 80
+WINDOW_WIDTH = 2 * (GRID_SIZE * CELL_SIZE) + GRID_GAP + 2 * MARGIN
+WINDOW_HEIGHT = GRID_SIZE * CELL_SIZE + 2 * MARGIN + 60
 
-# Couleurs (RVB)
+# Couleurs
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-DARK_GREY = (30, 30, 30)
-BLUE_WATER = (50, 150, 200) # Un bleu plus vibrant
-DEEP_BLUE = (25, 75, 100) # Pour le fond ou les ombres
-GREY_BOARD_LINES = (100, 100, 100) # Lignes de grille plus douces
-RED_HIT = (255, 50, 50) # Un rouge vif pour les coups
-WHITE_MISS = (150, 150, 150) # Un gris clair pour les manqués
-GREEN_SHIP = (50, 200, 50) # Un vert vif pour les navires
-HOVER_COLOR = (150, 200, 255) # Bleu clair pour le survol
-TEXT_COLOR = (240, 240, 240) # Presque blanc pour le texte
+BLUE = (100, 149, 237)
+GRAY = (200, 200, 200)
+GREEN = (50, 205, 50)
+RED = (220, 20, 60)
+NAVY = (0, 70, 140)
+YELLOW = (255, 215, 0)
 
-# Taille des cellules
-CELL_SIZE = 30 # Taille d'une cellule en pixels
+# Navires à placer (nom, taille, couleur)
+SHIPS = [
+    ("Porte-avions", 5, NAVY),
+    ("Cuirassé", 4, BLUE),
+    ("Destroyer", 3, GREEN),
+    ("Sous-marin", 3, YELLOW),
+    ("Patrouilleur", 2, RED),
+]
 
-# Positions des plateaux
-BOARD_OFFSET_X = 50
-BOARD_OFFSET_Y = 100
+# Initialisation de Pygame
+pygame.init()
 
-HUMAN_BOARD_X = BOARD_OFFSET_X
-HUMAN_BOARD_Y = BOARD_OFFSET_Y
+# Police personnalisée
+FONT_PATH = "assets/fonts/Police.ttf"
+FONT_SIZE = 28
+font = pygame.font.Font(FONT_PATH, FONT_SIZE)
+font_small = pygame.font.Font(FONT_PATH, 18)
 
-AI_BOARD_X = SCREEN_WIDTH - (BOARD_OFFSET_X + 10 * CELL_SIZE) # 10 est la taille du board
-AI_BOARD_Y = BOARD_OFFSET_Y
+# Création de la fenêtre
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+pygame.display.set_caption("Bataille Navale - Pygame")
 
-# Zone de messages
-MESSAGE_AREA_X = SCREEN_WIDTH // 2
-MESSAGE_AREA_Y = 50 # Au-dessus des plateaux
+# Fonctions d'affichage
+def draw_gradient_background(surface, color_top, color_bottom):
+    """Dessine un dégradé vertical du haut vers le bas."""
+    for y in range(WINDOW_HEIGHT):
+        ratio = y / WINDOW_HEIGHT
+        r = int(color_top[0] * (1 - ratio) + color_bottom[0] * ratio)
+        g = int(color_top[1] * (1 - ratio) + color_bottom[1] * ratio)
+        b = int(color_top[2] * (1 - ratio) + color_bottom[2] * ratio)
+        pygame.draw.line(surface, (r, g, b), (0, y), (WINDOW_WIDTH, y))
 
-# Police
-FONT_PATH = os.path.join(os.path.dirname(__file__), 'assets', 'fonts', 'Police.ttf')
+def draw_grid(surface, top_left, label):
+    x0, y0 = top_left
+    # Grille
+    for i in range(GRID_SIZE + 1):
+        # Lignes horizontales
+        pygame.draw.line(surface, BLACK, (x0, y0 + i * CELL_SIZE), (x0 + GRID_SIZE * CELL_SIZE, y0 + i * CELL_SIZE), 2)
+        # Lignes verticales
+        pygame.draw.line(surface, BLACK, (x0 + i * CELL_SIZE, y0), (x0 + i * CELL_SIZE, y0 + GRID_SIZE * CELL_SIZE), 2)
+    # Labels
+    for i in range(GRID_SIZE):
+        # Lettres colonnes
+        letter = chr(65 + i)
+        text = font_small.render(letter, True, BLACK)
+        surface.blit(text, (x0 + i * CELL_SIZE + CELL_SIZE // 2 - text.get_width() // 2, y0 - 22))
+        # Chiffres lignes
+        num = str(i + 1)
+        text = font_small.render(num, True, BLACK)
+        surface.blit(text, (x0 - 22, y0 + i * CELL_SIZE + CELL_SIZE // 2 - text.get_height() // 2))
+    # Titre grille
+    label_text = font.render(label, True, BLUE)
+    surface.blit(label_text, (x0 + GRID_SIZE * CELL_SIZE // 2 - label_text.get_width() // 2, y0 - 50))
 
+def draw_ships(surface, ships, top_left):
+    for ship in ships:
+        r, c, length, orientation, color = ship
+        for i in range(length):
+            rr = r + i if orientation == 'V' else r
+            cc = c + i if orientation == 'H' else c
+            rect = pygame.Rect(
+                top_left[0] + cc * CELL_SIZE + 2,
+                top_left[1] + rr * CELL_SIZE + 2,
+                CELL_SIZE - 4, CELL_SIZE - 4)
+            pygame.draw.rect(surface, color, rect)
+            pygame.draw.rect(surface, BLACK, rect, 2)
 
-class GUI:
-    def __init__(self, game: Game):
-        pygame.init()
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption(SCREEN_TITLE)
-        self.clock = pygame.time.Clock()
-        self.game = game
-
-        try:
-            self.font_lg = pygame.font.Font(FONT_PATH, 36)
-            self.font_md = pygame.font.Font(FONT_PATH, 24)
-            self.font_sm = pygame.font.Font(FONT_PATH, 18)
-        except FileNotFoundError:
-            print(f"Erreur: Le fichier de police '{FONT_PATH}' n'a pas été trouvé.")
-            print("Veuillez vous assurer que le chemin est correct ou utilisez une police système.")
-            self.font_lg = pygame.font.SysFont(None, 36)
-            self.font_md = pygame.font.SysFont(None, 24)
-            self.font_sm = pygame.font.SysFont(None, 18)
-        
-        self.current_message = ""
-        self.current_ship_index = 0 # Pour suivre le placement des navires du joueur
-        self.placement_orientation = 'H' # 'H' pour Horizontal, 'V' pour Vertical
-        self.hover_coords = None # Coordonnées de la cellule survolée par la souris
-
-        # Coordonnées du dernier tir de l'IA pour l'affichage
-        self.last_ai_shot = None
-
-    def _get_grid_coords(self, mouse_pos: Tuple[int, int], board_x: int, board_y: int) -> Optional[Tuple[int, int]]:
-        """Convertit les coordonnées de la souris en coordonnées de grille (row, col) pour un plateau donné."""
-        mouse_x, mouse_y = mouse_pos
-        
-        # Vérifier si la souris est sur le plateau
-        if board_x <= mouse_x < board_x + self.game.board_size * CELL_SIZE and \
-           board_y <= mouse_y < board_y + self.game.board_size * CELL_SIZE:
-            
-            col = (mouse_x - board_x) // CELL_SIZE
-            row = (mouse_y - board_y) // CELL_SIZE
-            return (row, col)
-        return None
-
-    def _draw_board(self, surface: pygame.Surface, board_obj: Board, start_x: int, start_y: int, hide_ships: bool = False):
-        """Dessine un plateau de jeu."""
-        # Dessiner la grille
-        for r in range(board_obj.size):
-            for c in range(board_obj.size):
-                rect = pygame.Rect(start_x + c * CELL_SIZE, start_y + r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                
-                cell_content = board_obj.grid[r][c]
-                color = BLUE_WATER
-
-                if cell_content == 'X':
-                    color = RED_HIT # Navire touché
-                elif cell_content == 'O':
-                    color = WHITE_MISS # Tir manqué
-                elif cell_content == 'S' and not hide_ships:
-                    color = GREEN_SHIP # Navire (visible pour le propriétaire)
-
-                pygame.draw.rect(surface, color, rect)
-                pygame.draw.rect(surface, GREY_BOARD_LINES, rect, 1) # Bordure de la cellule
-
-                # Dessiner les coordonnées pour l'aide visuelle (lettres et chiffres)
-                if c == 0:
-                    row_label = self.font_sm.render(str(r + 1), True, TEXT_COLOR)
-                    surface.blit(row_label, (start_x - 25, start_y + r * CELL_SIZE + CELL_SIZE // 4))
-                if r == 0:
-                    col_label = self.font_sm.render(chr(65 + c), True, TEXT_COLOR)
-                    surface.blit(col_label, (start_x + c * CELL_SIZE + CELL_SIZE // 4, start_y - 25))
-
-        # Dessiner les navires en cours de placement (si c'est le tour humain et en phase de placement)
-        if self.game.game_state == "placement" and self.game.current_player is self.game.player_human and not hide_ships:
-            self._draw_placement_preview()
-
-
-    def _draw_placement_preview(self):
-        """Dessine l'aperçu du navire en cours de placement."""
-        if self.game.game_state != "placement" or self.game.current_player is not self.game.player_human:
-            return
-
-        current_ship = self.game.player_human.ships_to_place[self.current_ship_index]
-        
-        if self.hover_coords:
-            hover_r, hover_c = self.hover_coords
-            start_x = HUMAN_BOARD_X + hover_c * CELL_SIZE
-            start_y = HUMAN_BOARD_Y + hover_r * CELL_SIZE
-
-            temp_coords = []
-            if self.placement_orientation == 'H':
-                for i in range(current_ship.length):
-                    if hover_c + i < self.game.board_size:
-                        temp_coords.append((hover_r, hover_c + i))
-            else: # 'V'
-                for i in range(current_ship.length):
-                    if hover_r + i < self.game.board_size:
-                        temp_coords.append((hover_r + i, hover_c))
-            
-            # Vérifier si le placement temporaire est valide pour changer la couleur de l'aperçu
-            is_valid = self.game.player_human.own_board.is_valid_placement_preview(
-                current_ship, (hover_r, hover_c), self.placement_orientation
-            )
-            preview_color = GREEN_SHIP if is_valid else RED_HIT
-
-            for r, c in temp_coords:
-                if 0 <= r < self.game.board_size and 0 <= c < self.game.board_size:
-                    rect = pygame.Rect(HUMAN_BOARD_X + c * CELL_SIZE, HUMAN_BOARD_Y + r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                    pygame.draw.rect(self.screen, preview_color, rect, 3) # Dessiner un cadre plus épais
-
-    def _draw_message(self, surface: pygame.Surface, message: str, x: int, y: int, font: pygame.font.Font, color: Tuple[int, int, int] = TEXT_COLOR):
-        """Dessine un message centré sur l'écran."""
-        text_surface = font.render(message, True, color)
-        text_rect = text_surface.get_rect(center=(x, y))
-        surface.blit(text_surface, text_rect)
-
-    def _handle_placement_events(self, event: pygame.event.Event):
-        """Gère les événements pendant la phase de placement des navires."""
-        if event.type == pygame.MOUSEMOTION:
-            self.hover_coords = self._get_grid_coords(event.pos, HUMAN_BOARD_X, HUMAN_BOARD_Y)
-        
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1: # Clic gauche
-                if self.hover_coords and self.current_ship_index < len(self.game.player_human.ships_to_place):
-                    current_ship = self.game.player_human.ships_to_place[self.current_ship_index]
-                    
-                    placed = self.game.player_human.own_board.place_ship(
-                        current_ship, self.hover_coords, self.placement_orientation
-                    )
-
-                    if placed:
-                        self.current_ship_index += 1
-                        if self.current_ship_index < len(self.game.player_human.ships_to_place):
-                            next_ship_name = self.game.player_human.ships_to_place[self.current_ship_index].name
-                            self.current_message = f"{self.game.player_human.name}, placez votre {next_ship_name}."
-                        else:
-                            self.current_message = "Tous vos navires sont placés. Cliquez n'importe où pour commencer la partie !"
-                            self.game.game_state = "pre_playing" # Nouvelle phase intermédiaire
-                    else:
-                        self.current_message = "Placement impossible. Chevauchement ou hors limite. Réessayez."
-                elif self.game.game_state == "pre_playing":
-                    self.game.game_state = "playing"
-                    self.current_message = "La partie commence ! C'est votre tour."
-                    # Assurez-vous que le joueur humain est bien le joueur actuel au début du jeu
-                    self.game.current_player = self.game.player_human
-                    self.game.opponent_player = self.game.player_ai
-
-            elif event.button == 3: # Clic droit
-                self.placement_orientation = 'V' if self.placement_orientation == 'H' else 'H'
-                self.current_message = f"Orientation : {'Horizontale' if self.placement_orientation == 'H' else 'Verticale'}"
-
-    def _handle_playing_events(self, event: pygame.event.Event):
-        """Gère les événements pendant la phase de jeu (tirs)."""
-        if event.type == pygame.MOUSEMOTION:
-            self.hover_coords = self._get_grid_coords(event.pos, AI_BOARD_X, AI_BOARD_Y)
-        
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1: # Clic gauche
-                if self.hover_coords:
-                    r, c = self.hover_coords
-                    # Vérifier si la case a déjà été tirée
-                    if self.game.player_human.target_board.grid[r][c] == '~': # Si c'est de l'eau non tirée
-                        shot_result = self.game._process_shot(self.game.player_human, self.game.player_ai, self.hover_coords)
-                        
-                        # Mettre à jour le message en fonction du résultat du tir
-                        if shot_result == "hit":
-                            self.current_message = f"Vous avez TOUCHÉ un navire ennemi en {chr(65 + c)}{r + 1}!"
-                        elif shot_result == "sunk":
-                            self.current_message = f"Vous avez COULÉ un navire ennemi en {chr(65 + c)}{r + 1}!"
-                        elif shot_result == "miss":
-                            self.current_message = f"Vous avez MANQUÉ en {chr(65 + c)}{r + 1}."
-                        
-                        # Le changement de tour se fait dans _process_shot
-                    else:
-                        self.current_message = "Vous avez déjà tiré à cet endroit ! Choisissez une autre case."
-                else:
-                    self.current_message = "Cliquez sur la grille ennemie pour tirer !"
-    
-    def _draw_background_pattern(self):
-        """
-        Dessine un motif d'arrière-plan simple ou une couleur unie.
-        """
-        self.screen.fill(DEEP_BLUE)
-
-    def run(self):
-        running = True
-        while running:
-            # Gérer les événements
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    mouse_x, mouse_y = event.pos
-                    if self.game.game_state == "placement":
-                        self._handle_placement_click(mouse_x, mouse_y, event.button)
-                    elif self.game.game_state == "playing" and self.game.current_player is self.game.player_human:
-                        # Clic du joueur humain pour tirer
-                        if event.button == 1: # Clic gauche
-                            # Vérifie si le clic est sur le plateau de l'IA (le plateau cible de l'humain)
-                            cell_clicked = self._get_cell_from_mouse(mouse_x, mouse_y, AI_BOARD_X, AI_BOARD_Y)
-                            if cell_clicked:
-                                row, col = cell_clicked
-                                shot_coord = (row, col)
-                                # Traiter le tir de l'humain
-                                result = self.game.player_human.shoot(self.game.player_ai, shot_coord)
-                                if result == "invalid":
-                                    self.current_message = "Cible déjà touchée ou hors limites. Réessayez."
-                                else:
-                                    self.current_message = f"Joueur a tiré en {chr(65 + col)}{row + 1}. Résultat: {result.upper()}!"
-                                    # Le tour change dans game.py après _process_shot
-                                    # Ici, nous devons passer le tour explicitement si le tir est valide
-                                    if result in ["hit", "miss", "sunk"]:
-                                        # Passer au tour de l'IA immédiatement après le tir valide du joueur
-                                        self.game._switch_players() 
-                                        print("GUI: Tir humain traité. C'est au tour de l'IA.")
-
-                    # else: # Si le clic n'est pas géré par un état spécifique, ne rien faire
-                    #     print(f"Clic ignoré en état {self.game.game_state} ou joueur non humain.")
-
-
-            # Logique de jeu basée sur l'état
-            if self.game.game_state == "placement":
-                # Le joueur place ses navires
-                # La logique est gérée par _handle_placement_click et met à jour current_placing_ship_index
-                pass # Rien à faire ici dans la boucle principale, tout est par événement
-
-            elif self.game.game_state == "playing":
-                if self.game.current_player is self.game.player_ai:
-                    # C'est le tour de l'IA
-                    print("GUI: C'est le tour de l'IA. L'IA va tirer.")
-                    self.current_message = "L'IA réfléchit à son prochain tir..."
-                    pygame.display.flip() # Mettre à jour l'affichage pour montrer le message
-
-                    pygame.time.wait(1000) # Petite pause pour voir le message
-
-                    shot_coord_ai = self.game.player_ai.get_shot_coordinates()
-                    print(f"IA tire en {chr(65 + shot_coord_ai[1])}{shot_coord_ai[0] + 1}")
-                    result_ai = self.game.player_ai.shoot(self.game.player_human, shot_coord_ai)
-                    self.current_message = f"L'IA a tiré en {chr(65 + shot_coord_ai[1])}{shot_coord_ai[0] + 1}. Résultat: {result_ai.upper()}!"
-                    print(f"GUI: IA a tiré. Résultat: {result_ai}")
-
-                    # L'IA a tiré, on passe au joueur suivant (l'humain)
-                    self.game._switch_players()
-                    print("GUI: Tir IA traité. C'est au tour de l'humain.")
-                    pygame.time.wait(500) # Petite pause après le tir de l'IA
-                    self.current_message = "C'est le tour de l'humain. Attente d'un clic." # Réinitialise le message pour l'humain
-
-
-                elif self.game.current_player is self.game.player_human:
-                    # C'est le tour de l'humain, on attend un clic (géré par l'événement MOUSEBUTTONDOWN)
-                    print("GUI: C'est le tour de l'humain. Attente d'un clic.")
-                    # Le message est déjà défini si un tir précédent a eu lieu, ou par défaut
-                    if not self.current_message.startswith("Joueur a tiré"): # Évite de remplacer le message de résultat du tir
-                        self.current_message = "C'est votre tour ! Cliquez sur le plateau ennemi pour tirer."
-
-            # Vérifier la condition de fin de jeu
-            if self.game.player_human.has_lost():
-                self.current_message = "GAME OVER ! L'IA a coulé tous vos navires !"
-                self.game.game_state = "game_over"
-                running = False # Arrête la boucle du jeu après le message
-                print("GUI: L'humain a perdu. Fin de partie.")
-            elif self.game.player_ai.has_lost():
-                self.current_message = "FELICITATIONS ! Vous avez coulé tous les navires de l'IA !"
-                self.game.game_state = "game_over"
-                running = False # Arrête la boucle du jeu après le message
-                print("GUI: L'IA a perdu. Fin de partie.")
-
-
-            # Dessiner tout
-            self.screen.fill(DEEP_BLUE) # Fond de l'écran
-            self._draw_background_pattern()
-
-            # Dessiner le plateau du joueur humain
-            self._draw_board(self.screen, self.game.player_human.own_board, HUMAN_BOARD_X, HUMAN_BOARD_Y, hide_ships=False)
-            # Dessiner le plateau cible du joueur humain
-            self._draw_board(self.screen, self.game.player_human.target_board, AI_BOARD_X, AI_BOARD_Y, hide_ships=True)
-
-            if self.game.game_state == "placement":
-                self._draw_placement_preview()
-
-
-            # Dessiner les titres des plateaux
-            human_title_surf = self.font_md.render("VOTRE FLOTTE", True, WHITE)
-            human_title_rect = human_title_surf.get_rect(midtop=(HUMAN_BOARD_X + (self.game.board_size * CELL_SIZE) // 2, HUMAN_BOARD_Y - 40))
-            self.screen.blit(human_title_surf, human_title_rect)
-
-            ai_title_surf = self.font_md.render("FLOTTE ENNEMIE", True, WHITE)
-            ai_title_rect = ai_title_surf.get_rect(midtop=(AI_BOARD_X + (self.game.board_size * CELL_SIZE) // 2, AI_BOARD_Y - 40))
-            self.screen.blit(ai_title_surf, ai_title_rect)
-
-            # Dessiner les messages
-            self._draw_message(self.screen, self.current_message, MESSAGE_AREA_X, MESSAGE_AREA_Y, self.font_md)
-            self._draw_message(self.screen, f"Tour: {self.game.current_player.name}", MESSAGE_AREA_X, MESSAGE_AREA_Y + 40, self.font_sm)
-
-            # Instructions spécifiques au placement
-            if self.game.game_state == "placement":
-                self._draw_message(self.screen, "Clic droit pour changer l'orientation.", MESSAGE_AREA_X, MESSAGE_AREA_Y + 80, self.font_sm, (255, 255, 0)) # Jaune pour plus de visibilité
-
-
-            pygame.display.flip()
-            self.clock.tick(60) # Limite à 60 FPS
-
-        # Si le jeu est terminé, rester affiché un court instant avant de quitter
-        if self.game.game_state == "game_over":
-            pygame.time.wait(3000) # Attendre 3 secondes avant de quitter
-
-        pygame.quit()
-        sys.exit()
-
-if __name__ == '__main__':
-    game = Game()
-    gui = GUI(game)
-
-    # L'IA place ses navires
-    print("IA place ses navires...")
-    game.player_ai.place_ships()
-    print("Tous les navires de IA sont placés. Préparez-vous !")
-
-    # Le placement du joueur humain commence via l'interface graphique
-    first_ship = gui.game.player_human.ships_to_place[0] if gui.game.player_human.ships_to_place else None
-    if first_ship:
-        gui.current_placing_ship = first_ship
-        gui.current_message = f"Placez votre {first_ship.name} (taille: {first_ship.length})."
-        gui.game.game_state = "placement"
+def is_valid_placement(ships, r, c, length, orientation):
+    # Vérifie si le navire ne sort pas de la grille et ne chevauche pas un autre navire
+    if orientation == 'H':
+        if c + length > GRID_SIZE:
+            return False
+        coords = [(r, c + i) for i in range(length)]
     else:
-        # Si pour une raison quelconque il n'y a pas de navires, passer directement en jeu
-        gui.game.game_state = "playing"
-        gui.current_message = "Tous les navires sont placés. Cliquez pour commencer le jeu."
+        if r + length > GRID_SIZE:
+            return False
+        coords = [(r + i, c) for i in range(length)]
+    for ship in ships:
+        sr, sc, slen, sorient, _ = ship
+        for i in range(slen):
+            sr2 = sr + i if sorient == 'V' else sr
+            sc2 = sc + i if sorient == 'H' else sc
+            if (sr2, sc2) in coords:
+                return False
+    return True
 
+def draw_shots(surface, shots, top_left):
+    for (r, c, result) in shots:
+        cx = top_left[0] + c * CELL_SIZE + CELL_SIZE // 2
+        cy = top_left[1] + r * CELL_SIZE + CELL_SIZE // 2
+        if result == 'miss':
+            pygame.draw.circle(surface, BLUE, (cx, cy), CELL_SIZE // 4, 3)
+        elif result == 'hit':
+            pygame.draw.line(surface, RED, (cx - 10, cy - 10), (cx + 10, cy + 10), 3)
+            pygame.draw.line(surface, RED, (cx + 10, cy - 10), (cx - 10, cy + 10), 3)
 
-    gui.run() # La boucle de jeu commence ici
+# Coordonnées des deux grilles
+player_grid_pos = (MARGIN, MARGIN + 60)
+ai_grid_pos = (MARGIN + GRID_SIZE * CELL_SIZE + GRID_GAP, MARGIN + 60)
+
+# Variables de placement
+placed_ships = []  # (row, col, length, orientation, color)
+current_ship_idx = 0
+current_orientation = 'H'  # 'H' ou 'V'
+placing_done = False
+
+# Variables de tir
+player_shots = []  # (row, col, 'hit' ou 'miss')
+ai_shots = []      # (row, col, 'hit' ou 'miss')
+shot_message = ""
+shot_message_timer = 0
+
+game_over = False
+winner = None  # 'joueur' ou 'ia'
+
+# Initialisation de l'IA avancée
+ai_player = AIPlayer(name="IA", board_size=GRID_SIZE)
+ai_player.place_ships()  # Placement automatique des navires IA
+# On récupère les coordonnées des navires IA pour la détection des tirs
+ai_ship_coords = set()
+for ship in ai_player.ships_to_place:
+    ai_ship_coords.update(ship.coordinates)
+
+# Ajout : fonction pour obtenir toutes les coordonnées occupées par les navires du joueur
+def get_player_ship_coords():
+    coords = set()
+    for r, c, length, orientation, color in placed_ships:
+        for i in range(length):
+            rr = r + i if orientation == 'V' else r
+            cc = c + i if orientation == 'H' else c
+            coords.add((rr, cc))
+    return coords
+
+# Création d'une grille du joueur pour l'IA (mise à jour après le placement)
+def create_player_board():
+    board = [['~' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    for r, c, length, orientation, color in placed_ships:
+        for i in range(length):
+            rr = r + i if orientation == 'V' else r
+            cc = c + i if orientation == 'H' else c
+            board[rr][cc] = 'S'
+    return board
+
+# Boucle principale
+running = True
+while running:
+    # Fond dégradé bleu (mer)
+    draw_gradient_background(screen, (70, 130, 180), (25, 25, 112))
+
+    screen.fill(WHITE)
+
+    # Afficher les deux grilles
+    draw_grid(screen, player_grid_pos, "Votre flotte")
+    draw_grid(screen, ai_grid_pos, "Grille de l'IA")
+
+    # Afficher les navires déjà placés
+    draw_ships(screen, placed_ships, player_grid_pos)
+
+    # Afficher les tirs du joueur sur la grille de l'IA
+    draw_shots(screen, player_shots, ai_grid_pos)
+    # Afficher les tirs de l'IA sur la grille du joueur
+    draw_shots(screen, ai_shots, player_grid_pos)
+
+    # Placement du navire courant
+    if not placing_done and current_ship_idx < len(SHIPS):
+        ship_name, ship_len, ship_color = SHIPS[current_ship_idx]
+        # Position de la souris sur la grille du joueur
+        mx, my = pygame.mouse.get_pos()
+        grid_x, grid_y = player_grid_pos
+        r = (my - grid_y) // CELL_SIZE
+        c = (mx - grid_x) // CELL_SIZE
+        # Afficher le navire en surbrillance si la souris est sur la grille
+        if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
+            valid = is_valid_placement(placed_ships, r, c, ship_len, current_orientation)
+            for i in range(ship_len):
+                rr = r + i if current_orientation == 'V' else r
+                cc = c + i if current_orientation == 'H' else c
+                rect = pygame.Rect(
+                    grid_x + cc * CELL_SIZE + 2,
+                    grid_y + rr * CELL_SIZE + 2,
+                    CELL_SIZE - 4, CELL_SIZE - 4)
+                color = ship_color if valid else (180, 180, 180)
+                pygame.draw.rect(screen, color, rect)
+                pygame.draw.rect(screen, BLACK, rect, 2)
+        # Afficher le nom et l'orientation
+        info = f"Placer : {ship_name} (taille {ship_len}) - Orientation : {'Horizontale' if current_orientation == 'H' else 'Verticale'}"
+        info_text = font_small.render(info, True, BLACK)
+        screen.blit(info_text, (MARGIN, WINDOW_HEIGHT - 40))
+    elif not placing_done:
+        placing_done = True
+
+    # Message de fin de placement
+    if placing_done:
+        done_text = font.render("Tous les navires sont placés !", True, GREEN)
+        screen.blit(done_text, (WINDOW_WIDTH // 2 - done_text.get_width() // 2, WINDOW_HEIGHT - 50))
+        # Afficher le message de tir si besoin
+        if shot_message:
+            msg = font_small.render(shot_message, True, BLACK)
+            screen.blit(msg, (ai_grid_pos[0], ai_grid_pos[1] + GRID_SIZE * CELL_SIZE + 10))
+        # Afficher le message de victoire
+        if game_over:
+            if winner == 'joueur':
+                end_text = font.render("Félicitations, vous avez gagné !", True, GREEN)
+            else:
+                end_text = font.render("L'IA a gagné...", True, RED)
+            screen.blit(end_text, (WINDOW_WIDTH // 2 - end_text.get_width() // 2, WINDOW_HEIGHT // 2 - end_text.get_height() // 2))
+
+    # Titre principal
+    title = font.render("Bataille Navale", True, BLACK)
+    screen.blit(title, (WINDOW_WIDTH // 2 - title.get_width() // 2, 10))
+
+    pygame.display.flip()
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        if not placing_done and current_ship_idx < len(SHIPS):
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    current_orientation = 'V' if current_orientation == 'H' else 'H'
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pygame.mouse.get_pos()
+                grid_x, grid_y = player_grid_pos
+                r = (my - grid_y) // CELL_SIZE
+                c = (mx - grid_x) // CELL_SIZE
+                if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
+                    if is_valid_placement(placed_ships, r, c, SHIPS[current_ship_idx][1], current_orientation):
+                        placed_ships.append((r, c, SHIPS[current_ship_idx][1], current_orientation, SHIPS[current_ship_idx][2]))
+                        current_ship_idx += 1
+                        current_orientation = 'H'  # Reset orientation par défaut
+        elif placing_done and not game_over:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pygame.mouse.get_pos()
+                grid_x, grid_y = ai_grid_pos
+                r = (my - grid_y) // CELL_SIZE
+                c = (mx - grid_x) // CELL_SIZE
+                if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
+                    if not any((r, c) == (rr, cc) for (rr, cc, _) in player_shots):
+                        if (r, c) in ai_ship_coords:
+                            player_shots.append((r, c, 'hit'))
+                            shot_message = f"Touché en {chr(65 + c)}{r + 1} !"
+                        else:
+                            player_shots.append((r, c, 'miss'))
+                            shot_message = f"Manqué en {chr(65 + c)}{r + 1}."
+                        shot_message_timer = pygame.time.get_ticks()
+                        # Vérifier si le joueur a gagné
+                        if all((coord in [(rr, cc) for (rr, cc, res) in player_shots if res == 'hit']) for coord in ai_ship_coords):
+                            game_over = True
+                            winner = 'joueur'
+                        else:
+                            # Riposte IA intelligente
+                            # Mettre à jour la grille du joueur pour l'IA
+                            player_board = create_player_board()
+                            # L'IA choisit où tirer
+                            ia_shot = ai_player.get_shot_coordinates()
+                            ia_r, ia_c = ia_shot
+                            # Déterminer le résultat du tir de l'IA
+                            if player_board[ia_r][ia_c] == 'S':
+                                ai_shots.append((ia_r, ia_c, 'hit'))
+                                shot_message = f"L'IA a touché votre navire en {chr(65 + ia_c)}{ia_r + 1} !"
+                                result = 'hit'
+                                player_board[ia_r][ia_c] = 'X'
+                            else:
+                                ai_shots.append((ia_r, ia_c, 'miss'))
+                                shot_message = f"L'IA a tiré en {chr(65 + ia_c)}{ia_r + 1} et a manqué."
+                                result = 'miss'
+                                player_board[ia_r][ia_c] = 'O'
+                            shot_message_timer = pygame.time.get_ticks()
+                            # L'IA apprend du résultat
+                            ai_player.process_shot_result(ia_shot, result)
+                            # Vérifier si l'IA a gagné
+                            player_coords = get_player_ship_coords()
+                            if all((coord in [(rr, cc) for (rr, cc, res) in ai_shots if res == 'hit']) for coord in player_coords):
+                                game_over = True
+                                winner = 'ia'
+    # Effacer le message après 1,5s
+    if shot_message and pygame.time.get_ticks() - shot_message_timer > 1500:
+        shot_message = ""
+
+pygame.quit()
+sys.exit() 

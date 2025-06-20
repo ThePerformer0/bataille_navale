@@ -73,8 +73,179 @@ class AIPlayer(Player):
                 r = random.randint(0, self.own_board.size - 1)
                 c = random.randint(0, self.own_board.size - 1)
                 orientation = random.choice(['H', 'V'])
-                placed = self.own_board.place_ship(ship, (r, c), orientation)
-        # print(f"Tous les navires de l'IA sont placés.") # Décommenter pour le debug
+                
+                # J'essaie de placer le navire. Le plateau vérifiera si c'est valide.
+                placed = self.own_board.place_ship(ship, start_coord, orientation)
+                # Si 'placed' est False, je boucle et j'essaie encore !
+        print(f"Tous les navires de {self.name} sont placés. Préparez-vous !")
+        # Note : Je n'affiche pas mon propre plateau, c'est un secret !
+
+    def _get_occupied_own_coordinates(self) -> List[Tuple[int, int]]:
+        """
+        Je récupère la liste de toutes les coordonnées où se trouvent MES PROPRES navires.
+        C'est pour être sûr de ne JAMAIS tirer sur moi-même. Ce serait bête, non ?
+        """
+        occupied_coords = []
+        for ship in self.ships_to_place:
+            occupied_coords.extend(ship.coordinates)
+        return occupied_coords
+
+    def update_untried_coordinates_after_placement(self):
+        """
+        Une fois que j'ai placé tous mes navires, je nettoie ma liste de cibles potentielles.
+        Je retire toutes les cases où se trouvent MES PROPRES navires.
+        Je ne vais quand même pas me saboter !
+        """
+        own_ship_coords = self._get_occupied_own_coordinates()
+        self.untried_coordinates = [
+            coord for coord in self.untried_coordinates 
+            if coord not in own_ship_coords
+        ]
+        # Je mélange à nouveau, juste pour le plaisir.
+        random.shuffle(self.untried_coordinates)
+
+    def analyze_opponent_shot(self, shot_coord: Tuple[int, int], result: str):
+        """
+        Ah, l'adversaire a tiré ! Laissez-moi noter ça sur ma carte secrète.
+        C'est super important pour ma stratégie future, croyez-moi !
+        """
+        r, c = shot_coord
+        self.opponent_shots_made.append(shot_coord) # Je garde une trace de TOUS vos tirs
+
+        # Et je mets à jour ma grille de suivi : X si touché, O si raté.
+        if result == 'hit' or result == 'sunk':
+            self.opponent_shot_tracking_grid[r][c] = 'X'
+        elif result == 'miss':
+            self.opponent_shot_tracking_grid[r][c] = 'O'
+        # Si vous n'avez pas tiré dans une zone, elle reste 'U' (Untouched).
+        # Et ça, c'est une information précieuse pour moi...
+
+    def get_shot_coordinates(self, opponent_remaining_hp: Optional[int] = None) -> Tuple[int, int]:
+        """
+        C'est l'heure de mon coup ! Je vais décider où tirer.
+        Ma logique est en plusieurs étapes, par ordre de priorité :
+
+        1.  Je finis le navire que j'ai déjà bien entamé (mode "ciblage actif").
+        2.  Si la partie est presque finie (vous avez peu de points de vie),
+            je reviens sur n'importe quel autre navire que j'ai touché par le passé,
+            pour l'achever (mode "fin de jeu").
+        3.  Sinon, je pars à la "chasse" : je cherche de nouveaux navires,
+            en privilégiant les zones où VOUS n'avez pas tiré (mode "chasse intelligente").
+        """
+        # Obtenir les coordonnées de mes propres navires pour éviter de me tirer dessus
+        own_ship_coords = self._get_occupied_own_coordinates()
+
+        # Priorité 1: Phase de ciblage active
+        # Si j'ai des hits à traiter ET une série de hits en cours (ou que j'initialise une nouvelle série)
+        while self.hits_to_process:
+            # Si ma série de hits actuelle est vide OU que le premier hit de ma série n'est plus dans mes hits à traiter
+            # (ça peut arriver si un bateau est coulé et que hits_to_process n'a pas été entièrement nettoyé,
+            # ou si current_hit_series a été vidée et qu'il reste d'autres hits à explorer).
+            if not self.current_hit_series or self.current_hit_series[0] not in self.hits_to_process:
+                # Je me réinitialise pour cibler le premier hit non résolu.
+                self.current_hit_series = [self.hits_to_process[0]]
+                # Je cherche les voisins autour de ce hit, en évitant mes propres bateaux.
+                self.potential_next_shots = [
+                    coord for coord in self._get_surrounding_coordinates(self.hits_to_process[0][0], self.hits_to_process[0][1])
+                    if coord in self.untried_coordinates and coord not in own_ship_coords
+                ]
+                random.shuffle(self.potential_next_shots)
+                self.current_target_direction = None # Réinitialiser la direction car je change de cible "principale"
+
+            # Si j'ai au moins deux hits dans ma série et que je n'ai plus de tirs potentiels,
+            # c'est que je dois déduire la direction du navire pour continuer.
+            if len(self.current_hit_series) >= 2 and not self.potential_next_shots:
+                self._determine_and_extend_direction() # J'affine ma stratégie pour prolonger la ligne
+
+            # Si après tout ça, ma liste de tirs potentiels est vide (j'ai tout exploré autour du hit initial
+            # ou mes prolongements n'ont rien donné), je reprends autour du DERNIER hit de ma série.
+            if not self.potential_next_shots:
+                last_series_hit = self.current_hit_series[-1]
+                self.potential_next_shots = [
+                    coord for coord in self._get_surrounding_coordinates(last_series_hit[0], last_series_hit[1])
+                    if coord in self.untried_coordinates and coord not in own_ship_coords # Toujours filtrer mes bateaux !
+                ]
+                random.shuffle(self.potential_next_shots)
+
+            # Si j'ai des tirs potentiels, j'en prends un et je le joue.
+            if self.potential_next_shots:
+                shot_coord = self.potential_next_shots.pop(0)
+                if shot_coord in self.untried_coordinates: # S'assurer que je ne l'ai pas déjà tiré par accident
+                    self.untried_coordinates.remove(shot_coord)
+                    print(f"{self.name} cible à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} (mode ciblage actif) !")
+                    return shot_coord
+                self.potential_next_shots = [] # Si le coup n'est plus valide, vider pour recalculer
+
+            # Si je n'ai plus de tirs potentiels pour le hit en cours, ça veut dire que ce hit
+            # ne m'a pas mené à couler un bateau (peut-être un coup isolé ou un navire coulé par un autre moyen).
+            # Je le retire donc de ma liste de hits à traiter et je réinitialise ma série.
+            if self.hits_to_process: # S'assurer qu'il y a quelque chose à pop
+                 self.hits_to_process.pop(0)
+            self.current_hit_series = []
+            self.current_target_direction = None
+            self.potential_next_shots = []
+
+        # Priorité 2: Stratégie de fin de jeu (mon mode "finisher" !)
+        # Si vous n'avez presque plus de vie ET qu'il me reste des hits "dormants" (navires touchés mais pas coulés).
+        if opponent_remaining_hp is not None and opponent_remaining_hp <= self.endgame_threshold:
+            # Je filtre les hits qui n'ont pas encore été traités et qui ne sont pas des bateaux coulés.
+            dormant_hits = [
+                h for h in self.hits_to_process if h not in self.sunk_ships_coords
+            ]
+            random.shuffle(dormant_hits) # Un peu d'aléatoire pour rester imprévisible
+
+            if dormant_hits:
+                # Je choisis le premier hit dormant et je le traite comme un nouveau point de départ.
+                first_dormant_hit = dormant_hits[0]
+                self.current_hit_series = [first_dormant_hit] # Je le mets dans ma série actuelle
+                self.potential_next_shots = [
+                    coord for coord in self._get_surrounding_coordinates(first_dormant_hit[0], first_dormant_hit[1])
+                    if coord in self.untried_coordinates and coord not in own_ship_coords # Toujours mes propres bateaux... non !
+                ]
+                random.shuffle(self.potential_next_shots)
+
+                if self.potential_next_shots:
+                    shot_coord = self.potential_next_shots.pop(0)
+                    if shot_coord in self.untried_coordinates:
+                        self.untried_coordinates.remove(shot_coord)
+                        print(f"{self.name} (MODE FIN DE JEU) cible un ancien hit à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} !")
+                        return shot_coord
+                    self.potential_next_shots = [] # Si le coup n'est plus valide
+
+        # Priorité 3: Phase de chasse améliorée (je cherche de nouvelles cibles intelligemment)
+        # Je divise les cases non encore tirées en deux catégories :
+        # 1. Celles où VOUS n'avez pas tiré sur MON plateau (potentiellement vos navires !)
+        # 2. Celles où VOUS avez déjà tiré (moins probable que vos navires y soient).
+        
+        # Je filtre `untried_coordinates` pour ne pas inclure mes propres bateaux ici.
+        # (Normalement, `update_untried_coordinates_after_placement` le fait déjà au début,
+        # mais c'est une sécurité supplémentaire et pour les cas où cette méthode est appelée plus tard).
+        available_untried_for_hunt = [coord for coord in self.untried_coordinates if coord not in own_ship_coords]
+
+        # --- STRATÉGIE DE PROBABILITÉ ---
+        prob_grid = self._compute_probability_grid()
+        max_prob = 0
+        best_coords = []
+        for r in range(self.own_board.size):
+            for c in range(self.own_board.size):
+                if (r, c) in self.untried_coordinates and (r, c) not in own_ship_coords:
+                    if prob_grid[r][c] > max_prob:
+                        max_prob = prob_grid[r][c]
+                        best_coords = [(r, c)]
+                    elif prob_grid[r][c] == max_prob and max_prob > 0:
+                        best_coords.append((r, c))
+        if best_coords:
+            # On privilégie la parité si possible
+            parity_best = [(r, c) for (r, c) in best_coords if (r + c) % 2 == 0]
+            candidates = parity_best if parity_best else best_coords
+            shot_coord = random.choice(candidates)
+            self.untried_coordinates.remove(shot_coord)
+            print(f"{self.name} utilise la grille de probabilités à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} !")
+            return shot_coord
+        
+        # Si, par un miracle ou un bug, je n'ai plus aucune coordonnée à tirer,
+        # c'est que quelque chose ne va pas.
+        raise Exception("L'IA n'a plus de coups possibles ! (Tous les navires devraient être coulés ou jeu buggé)")
 
     def _get_surrounding_coordinates(self, r: int, c: int) -> List[Tuple[int, int]]:
         """Retourne les coordonnées adjacentes (haut, bas, gauche, droite) d'une cellule."""
@@ -292,15 +463,38 @@ class AIPlayer(Player):
             
         print(f"IA: Fin process_shot_result.") 
 
-    def update_untried_coordinates_after_placement(self):
+        # Dans tous les cas, ce coup a été joué, donc je le retire de ma liste de coups à essayer.
+        if shot_coord in self.untried_coordinates:
+            self.untried_coordinates.remove(shot_coord)
+
+    def _compute_probability_grid(self) -> List[List[int]]:
         """
-        Met à jour untried_coordinates pour retirer les cases où l'IA a placé ses propres navires.
-        À appeler une fois, après que tous les navires de l'IA aient été placés.
-        (Normalement, l'IA ne tire pas sur son propre plateau, mais c'est une bonne pratique).
+        Calcule une grille de probabilités : pour chaque case, le nombre de façons dont un navire restant peut s'y trouver.
         """
-        # Pour une IA, cette fonction n'est pas strictement nécessaire pour la logique de tir,
-        # car elle tire sur le target_board (plateau de l'adversaire), pas sur son own_board.
-        # Mais si une IA devait se "souvenir" de son propre placement pour une raison quelconque,
-        # ou pour éviter des bugs conceptuels, elle pourrait être utile.
-        # Pour le moment, on ne la modifie pas car elle n'est pas appelée dans le flux de jeu actuel.
-        pass
+        size = self.own_board.size
+        prob_grid = [[0 for _ in range(size)] for _ in range(size)]
+        # On considère uniquement les navires non coulés
+        ships_left = [ship for ship in self.ships_to_place if not all(coord in self.sunk_ships_coords for coord in ship.coordinates)]
+        # Cases déjà tirées (toutes les cases de la grille qui ne sont pas '~')
+        forbidden = set()
+        for r in range(size):
+            for c in range(size):
+                if self.target_board.grid[r][c] != '~':
+                    forbidden.add((r, c))
+        for ship in ships_left:
+            length = ship.length if hasattr(ship, 'length') else len(ship.coordinates)
+            # Horizontal
+            for r in range(size):
+                for c in range(size - length + 1):
+                    positions = [(r, c + i) for i in range(length)]
+                    if all(self.target_board.grid[x][y] != 'O' and (x, y) not in forbidden for (x, y) in positions):
+                        for (x, y) in positions:
+                            prob_grid[x][y] += 1
+            # Vertical
+            for c in range(size):
+                for r in range(size - length + 1):
+                    positions = [(r + i, c) for i in range(length)]
+                    if all(self.target_board.grid[x][y] != 'O' and (x, y) not in forbidden for (x, y) in positions):
+                        for (x, y) in positions:
+                            prob_grid[x][y] += 1
+        return prob_grid

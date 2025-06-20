@@ -135,3 +135,11 @@ class Game:
         # Afficher les plateaux finaux
         self.player_human.display_boards()
         self.player_ai.own_board.display(hide_ships=False) # Révèle le plateau de l'IA à la fin
+
+        # Message final sur le gagnant
+        if self.player_human.has_lost():
+            print("\nLa partie est terminée. L'IA a gagné !")
+        elif self.player_ai.has_lost():
+            print("\nLa partie est terminée. Félicitations, vous avez gagné contre l'IA !")
+        else:
+            print("\nLa partie est terminée.")
