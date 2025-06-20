@@ -128,3 +128,29 @@ class Board:
                 if self.grid[r][c] == 'X' or self.grid[r][c] == 'O':
                     shot_coords.append((r, c))
         return shot_coords
+    
+    def is_valid_placement_preview(self, ship: Ship, start_coord: Tuple[int, int], orientation: str) -> bool:
+        """
+        Vérifie si un placement de navire est valide SANS modifier la grille.
+        Utilisé pour l'aperçu visuel pendant le placement.
+        """
+        r_start, c_start = start_coord
+        ship_length = ship.length
+
+        # Vérifier si toutes les coordonnées sont dans les limites et ne chevauchent pas
+        if orientation == 'H':
+            if c_start + ship_length > self.size:
+                return False  # Dépasse la largeur du plateau
+            for i in range(ship_length):
+                if self.grid[r_start][c_start + i] == 'S':
+                    return False  # Chevauche un autre navire
+        elif orientation == 'V':
+            if r_start + ship_length > self.size:
+                return False  # Dépasse la hauteur du plateau
+            for i in range(ship_length):
+                if self.grid[r_start + i][c_start] == 'S':
+                    return False  # Chevauche un autre navire
+        else:
+            return False # Orientation invalide (devrait pas arriver si bien géré en amont)
+        
+        return True # Le placement est valide pour l'aperçu
