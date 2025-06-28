@@ -3,6 +3,7 @@ import sys
 import random
 import os
 from src.ai_player import AIPlayer
+from src.ship import Ship
 
 # Constantes
 GRID_SIZE = 10
@@ -124,6 +125,7 @@ ai_grid_pos = (MARGIN + GRID_SIZE * CELL_SIZE + GRID_GAP, MARGIN + 60)
 
 # Variables de placement
 placed_ships = []  # (row, col, length, orientation, color)
+player_ship_objects = []  # Liste des objets Ship du joueur
 current_ship_idx = 0
 current_orientation = 'H'  # 'H' ou 'V'
 placing_done = False
@@ -148,21 +150,16 @@ for ship in ai_player.ships_to_place:
 # Ajout : fonction pour obtenir toutes les coordonnées occupées par les navires du joueur
 def get_player_ship_coords():
     coords = set()
-    for r, c, length, orientation, color in placed_ships:
-        for i in range(length):
-            rr = r + i if orientation == 'V' else r
-            cc = c + i if orientation == 'H' else c
-            coords.add((rr, cc))
+    for ship in player_ship_objects:
+        coords.update(ship.coordinates)
     return coords
 
 # Création d'une grille du joueur pour l'IA (mise à jour après le placement)
 def create_player_board():
     board = [['~' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-    for r, c, length, orientation, color in placed_ships:
-        for i in range(length):
-            rr = r + i if orientation == 'V' else r
-            cc = c + i if orientation == 'H' else c
-            board[rr][cc] = 'S'
+    for ship in player_ship_objects:
+        for coord in ship.coordinates:
+            board[coord[0]][coord[1]] = 'S'
     return board
 
 # Boucle principale
@@ -249,7 +246,22 @@ while running:
                 c = (mx - grid_x) // CELL_SIZE
                 if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
                     if is_valid_placement(placed_ships, r, c, SHIPS[current_ship_idx][1], current_orientation):
-                        placed_ships.append((r, c, SHIPS[current_ship_idx][1], current_orientation, SHIPS[current_ship_idx][2]))
+                        # Créer l'objet Ship
+                        ship_name, ship_length, ship_color = SHIPS[current_ship_idx]
+                        ship_obj = Ship(ship_name, ship_length)
+                        
+                        # Calculer et assigner les coordonnées
+                        ship_coords = []
+                        for i in range(ship_length):
+                            rr = r + i if current_orientation == 'V' else r
+                            cc = c + i if current_orientation == 'H' else c
+                            ship_coords.append((rr, cc))
+                        ship_obj.coordinates = ship_coords
+                        
+                        # Ajouter aux listes
+                        placed_ships.append((r, c, ship_length, current_orientation, ship_color))
+                        player_ship_objects.append(ship_obj)
+                        
                         current_ship_idx += 1
                         current_orientation = 'H'  # Reset orientation par défaut
         elif placing_done and not game_over:
@@ -294,7 +306,17 @@ while running:
                             ai_player.process_shot_result(ia_shot, result)
                             # Vérifier si l'IA a gagné
                             player_coords = get_player_ship_coords()
-                            if all((coord in [(rr, cc) for (rr, cc, res) in ai_shots if res == 'hit']) for coord in player_coords):
+                            ai_hit_coords = [(rr, cc) for (rr, cc, res) in ai_shots if res == 'hit']
+                            
+                            # Debug: afficher les coordonnées pour comprendre le problème
+                            print(f"Coordonnées des navires du joueur: {player_coords}")
+                            print(f"Coordonnées touchées par l'IA: {ai_hit_coords}")
+                            
+                            # Vérifier si toutes les coordonnées des navires du joueur ont été touchées
+                            all_hit = all(coord in ai_hit_coords for coord in player_coords)
+                            print(f"Toutes les coordonnées touchées: {all_hit}")
+                            
+                            if all_hit:
                                 game_over = True
                                 winner = 'ia'
     # Effacer le message après 1,5s

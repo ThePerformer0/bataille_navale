@@ -25,6 +25,17 @@ class AIPlayer(Player):
         self.opponent_shots_made: List[Tuple[int, int]] = []
 
         self.endgame_threshold: int = 3 
+        
+        # Statistiques pour l'adaptation dynamique
+        self.shots_fired: int = 0
+        self.hits_achieved: int = 0
+        self.ships_sunk: int = 0
+        self.consecutive_misses: int = 0
+        self.last_shot_result: Optional[str] = None
+        
+        # Paramètres adaptatifs
+        self.aggression_level: float = 1.0  # 0.5 = conservateur, 2.0 = agressif
+        self.parity_preference: float = 1.0  # Préférence pour la stratégie de parité
 
     def _initialize_untried_coordinates(self):
         """
@@ -61,22 +72,50 @@ class AIPlayer(Player):
 
     def place_ships(self):
         """
-        L'IA place ses navires aléatoirement sur son plateau.
+        L'IA place ses navires de manière stratégique pour maximiser ses chances de survie.
         """
         # Utilise une copie mélangée pour éviter de toujours placer les navires au même endroit
         ships_to_place_shuffled = list(self.ships_to_place)
         random.shuffle(ships_to_place_shuffled)
 
+        # Stratégie de placement : éviter les patterns prévisibles
+        # 1. Placer les gros navires en premier (plus difficiles à placer)
+        # 2. Éviter les coins et les bords (souvent ciblés en premier)
+        # 3. Créer des "zones mortes" pour tromper l'adversaire
+        
         for ship in ships_to_place_shuffled:
             placed = False
-            while not placed:
-                r = random.randint(0, self.own_board.size - 1)
-                c = random.randint(0, self.own_board.size - 1)
+            attempts = 0
+            max_attempts = 1000  # Éviter les boucles infinies
+            
+            while not placed and attempts < max_attempts:
+                attempts += 1
+                
+                # Stratégie de placement intelligente
+                if ship.length >= 4:  # Gros navires
+                    # Éviter les bords pour les gros navires
+                    r = random.randint(2, self.own_board.size - 3)
+                    c = random.randint(2, self.own_board.size - 3)
+                else:  # Petits navires
+                    # Plus de liberté pour les petits navires
+                    r = random.randint(0, self.own_board.size - 1)
+                    c = random.randint(0, self.own_board.size - 1)
+                
                 orientation = random.choice(['H', 'V'])
                 
-                # J'essaie de placer le navire. Le plateau vérifiera si c'est valide.
-                placed = self.own_board.place_ship(ship, start_coord, orientation)
-                # Si 'placed' est False, je boucle et j'essaie encore !
+                # Vérifier si le placement est valide
+                placed = self.own_board.place_ship(ship, (r, c), orientation)
+                
+                # Si pas placé après beaucoup d'essais, relâcher les contraintes
+                if not placed and attempts > 500:
+                    r = random.randint(0, self.own_board.size - 1)
+                    c = random.randint(0, self.own_board.size - 1)
+                    orientation = random.choice(['H', 'V'])
+                    placed = self.own_board.place_ship(ship, (r, c), orientation)
+        
+        if attempts >= max_attempts:
+            print(f"ATTENTION: Impossible de placer tous les navires de {self.name} !")
+        
         print(f"Tous les navires de {self.name} sont placés. Préparez-vous !")
         # Note : Je n'affiche pas mon propre plateau, c'est un secret !
 
@@ -213,19 +252,13 @@ class AIPlayer(Player):
                     self.potential_next_shots = [] # Si le coup n'est plus valide
 
         # Priorité 3: Phase de chasse améliorée (je cherche de nouvelles cibles intelligemment)
-        # Je divise les cases non encore tirées en deux catégories :
-        # 1. Celles où VOUS n'avez pas tiré sur MON plateau (potentiellement vos navires !)
-        # 2. Celles où VOUS avez déjà tiré (moins probable que vos navires y soient).
-        
-        # Je filtre `untried_coordinates` pour ne pas inclure mes propres bateaux ici.
-        # (Normalement, `update_untried_coordinates_after_placement` le fait déjà au début,
-        # mais c'est une sécurité supplémentaire et pour les cas où cette méthode est appelée plus tard).
-        available_untried_for_hunt = [coord for coord in self.untried_coordinates if coord not in own_ship_coords]
-
-        # --- STRATÉGIE DE PROBABILITÉ ---
+        # Utiliser la grille de probabilités sophistiquée
         prob_grid = self._compute_probability_grid()
+        
+        # Trouver les cases avec la probabilité maximale
         max_prob = 0
         best_coords = []
+        
         for r in range(self.own_board.size):
             for c in range(self.own_board.size):
                 if (r, c) in self.untried_coordinates and (r, c) not in own_ship_coords:
@@ -234,13 +267,31 @@ class AIPlayer(Player):
                         best_coords = [(r, c)]
                     elif prob_grid[r][c] == max_prob and max_prob > 0:
                         best_coords.append((r, c))
-        if best_coords:
-            # On privilégie la parité si possible
+        
+        # Si on a des cases avec une probabilité élevée, les utiliser
+        if best_coords and max_prob > 0:
+            # Privilégier la parité parmi les meilleures cases
             parity_best = [(r, c) for (r, c) in best_coords if (r + c) % 2 == 0]
             candidates = parity_best if parity_best else best_coords
             shot_coord = random.choice(candidates)
             self.untried_coordinates.remove(shot_coord)
-            print(f"{self.name} utilise la grille de probabilités à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} !")
+            print(f"{self.name} utilise la grille de probabilités avancée à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} !")
+            return shot_coord
+        
+        # Si pas de probabilités élevées, utiliser la stratégie de parité optimisée
+        optimal_parity_coords = self._get_optimal_parity_coordinates()
+        if optimal_parity_coords:
+            shot_coord = random.choice(optimal_parity_coords)
+            self.untried_coordinates.remove(shot_coord)
+            print(f"{self.name} utilise la stratégie de parité optimisée à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} !")
+            return shot_coord
+        
+        # Fallback : tir aléatoire parmi les coordonnées non essayées
+        available_coords = [coord for coord in self.untried_coordinates if coord not in own_ship_coords]
+        if available_coords:
+            shot_coord = random.choice(available_coords)
+            self.untried_coordinates.remove(shot_coord)
+            print(f"{self.name} utilise un tir aléatoire à {chr(65 + shot_coord[1])}{shot_coord[0] + 1} !")
             return shot_coord
         
         # Si, par un miracle ou un bug, je n'ai plus aucune coordonnée à tirer,
@@ -252,7 +303,7 @@ class AIPlayer(Player):
         coords = []
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]: # Haut, Bas, Gauche, Droite
             nr, nc = r + dr, c + dc
-            if 0 <= nr < self.board_size and 0 <= nc < self.board_size:
+            if 0 <= nr < self.own_board.size and 0 <= nc < self.own_board.size:
                 coords.append((nr, nc))
         return coords
 
@@ -293,7 +344,7 @@ class AIPlayer(Player):
         if self.current_target_direction == 'H':
             # Vers la droite
             next_c_right = last_hit[1] + 1
-            if next_c_right < self.board_size and (last_hit[0], next_c_right) in self.untried_coordinates:
+            if next_c_right < self.own_board.size and (last_hit[0], next_c_right) in self.untried_coordinates:
                 self.potential_next_shots.append((last_hit[0], next_c_right))
             # Vers la gauche (à partir du premier hit de la série)
             next_c_left = self.current_hit_series[0][1] - 1
@@ -302,7 +353,7 @@ class AIPlayer(Player):
         elif self.current_target_direction == 'V':
             # Vers le bas
             next_r_down = last_hit[0] + 1
-            if next_r_down < self.board_size and (next_r_down, last_hit[1]) in self.untried_coordinates:
+            if next_r_down < self.own_board.size and (next_r_down, last_hit[1]) in self.untried_coordinates:
                 self.potential_next_shots.append((next_r_down, last_hit[1]))
             # Vers le haut (à partir du premier hit de la série)
             next_r_up = self.current_hit_series[0][0] - 1
@@ -312,7 +363,7 @@ class AIPlayer(Player):
         # Filtrez les tirs déjà faits ou hors limites
         self.potential_next_shots = [
             coord for coord in self.potential_next_shots
-            if 0 <= coord[0] < self.board_size and 0 <= coord[1] < self.board_size and \
+            if 0 <= coord[0] < self.own_board.size and 0 <= coord[1] < self.own_board.size and \
                self.target_board.grid[coord[0]][coord[1]] == '~' # Assure que ce n'est pas déjà tiré
         ]
         random.shuffle(self.potential_next_shots) # Mélange pour un peu d'aléatoire
@@ -333,93 +384,25 @@ class AIPlayer(Player):
         random.shuffle(self.potential_next_shots)
         print("IA: Fin _generate_surrounding_shots.")
 
-
-    def get_shot_coordinates(self) -> Tuple[int, int]:
-        """
-        Détermine les coordonnées du prochain tir de l'IA.
-        """
-        print("IA: Début de get_shot_coordinates.") # DEBUG POINT 1
-
-        # Stratégie de ciblage (Hunting)
-        if self.hits_to_process:
-            print(f"IA: En mode ciblage. Hits à traiter: {len(self.hits_to_process)}") # DEBUG POINT 2
-            
-            self.hits_to_process = list(set(self.hits_to_process))
-            self.current_hit_series = list(set(self.current_hit_series))
-            
-            if not self.potential_next_shots or \
-               (len(self.current_hit_series) > 0 and self.current_hit_series[-1] not in self.hits_to_process):
-                
-                print("IA: Régénération des potential_next_shots.") # DEBUG POINT 3
-                if len(self.current_hit_series) == 1:
-                    self._generate_surrounding_shots(self.current_hit_series[0])
-                    print(f"IA: Généré autour de {self.current_hit_series[0]}. Potential: {self.potential_next_shots}") # DEBUG POINT 4
-                elif len(self.current_hit_series) > 1:
-                    self._determine_and_extend_direction()
-                    print(f"IA: Déterminé et étendu la direction. Potential: {self.potential_next_shots}") # DEBUG POINT 5
-                elif self.hits_to_process:
-                    self.current_hit_series.append(self.hits_to_process[0])
-                    self._generate_surrounding_shots(self.hits_to_process[0])
-                    print(f"IA: Commencé nouvelle série depuis hits_to_process. Potential: {self.potential_next_shots}") # DEBUG POINT 6
-
-            # Tenter de trouver un tir valide parmi les potentiels
-            while self.potential_next_shots:
-                shot = self.potential_next_shots.pop(0)
-                r, c = shot
-                print(f"IA: Essai de tir potentiel: {shot}. Contenu: {self.target_board.grid[r][c]}") # DEBUG POINT 7
-                if 0 <= r < self.board_size and 0 <= c < self.board_size and \
-                   self.target_board.grid[r][c] == '~' and \
-                   shot in self.untried_coordinates:
-                    print(f"IA: Tir ciblé valide trouvé: {shot}") # DEBUG POINT 8
-                    return shot
-                print(f"IA: Tir potentiel {shot} invalide ou déjà fait.") # DEBUG POINT 9
-            
-            print("IA: Potential_next_shots épuisés pour la série actuelle. Réinitialisation.") # DEBUG POINT 10
-            self.current_hit_series = []
-            self.current_target_direction = None
-            self.potential_next_shots = []
-
-        # Stratégie de chasse (Searching)
-        print("IA: En mode chasse.") # DEBUG POINT 11
-        
-        self.untried_coordinates = [
-            coord for coord in self.untried_coordinates 
-            if self.target_board.grid[coord[0]][coord[1]] == '~'
-        ]
-
-        if not self.untried_coordinates:
-            print("IA: Plus de coordonnées à essayer. Fin de partie?") # DEBUG POINT 12
-            return (-1, -1)
-        
-        checkered_coords = []
-        for r, c in self.untried_coordinates:
-            if (r + c) % 2 == 0:
-                checkered_coords.append((r, c))
-        
-        if checkered_coords:
-            shot = random.choice(checkered_coords)
-            print(f"IA: Tir de chasse (damier): {shot}") # DEBUG POINT 13
-        else:
-            shot = random.choice(self.untried_coordinates)
-            print(f"IA: Tir de chasse (aléatoire): {shot}") # DEBUG POINT 14
-        
-        print("IA: Fin de get_shot_coordinates.") # DEBUG POINT 15
-        return shot
-
-
     def process_shot_result(self, shot_coord: Tuple[int, int], result: str):
         """
         Met à jour l'état interne de l'IA en fonction du résultat de son tir.
-        Ceci est crucial pour que l'IA apprenne et adapte sa stratégie.
+        Inclut l'adaptation dynamique de la stratégie basée sur les performances.
         """
         print(f"IA: Début process_shot_result pour {shot_coord}, résultat: {result}.")
         r, c = shot_coord
+        
+        # Mettre à jour les statistiques
+        self.shots_fired += 1
+        self.last_shot_result = result
         
         # Assurez-vous de retirer la coordonnée des tirs non essayés
         if shot_coord in self.untried_coordinates:
             self.untried_coordinates.remove(shot_coord)
 
         if result == 'hit':
+            self.hits_achieved += 1
+            self.consecutive_misses = 0  # Reset les misses consécutifs
             self.target_board.grid[r][c] = 'X'
             # Ajouter à hits_to_process si ce n'est pas déjà un doublon
             if shot_coord not in self.hits_to_process:
@@ -430,6 +413,7 @@ class AIPlayer(Player):
             self.potential_next_shots = [] # Vider, car on va en regénérer des meilleurs
 
         elif result == 'miss':
+            self.consecutive_misses += 1
             self.target_board.grid[r][c] = 'O'
             # Si on a manqué alors qu'on était en mode ciblage/extension
             # et que potential_next_shots est vide ou que la direction n'est plus viable
@@ -449,6 +433,9 @@ class AIPlayer(Player):
                 self.current_hit_series = [] # Vider la série actuelle car la direction est brisée
 
         elif result == 'sunk':
+            self.hits_achieved += 1
+            self.ships_sunk += 1
+            self.consecutive_misses = 0
             self.target_board.grid[r][c] = 'X' 
             # Quand un navire est coulé, retirer toutes les coordonnées de hits_to_process
             # qui faisaient partie de la série coulé (current_hit_series)
@@ -460,8 +447,11 @@ class AIPlayer(Player):
             self.current_hit_series = [] 
             self.current_target_direction = None 
             self.potential_next_shots = [] 
+        
+        # Adaptation dynamique de la stratégie
+        self._adapt_strategy()
             
-        print(f"IA: Fin process_shot_result.") 
+        print(f"IA: Fin process_shot_result. Stats: {self.hits_achieved}/{self.shots_fired} hits, {self.ships_sunk} coulés.")
 
         # Dans tous les cas, ce coup a été joué, donc je le retire de ma liste de coups à essayer.
         if shot_coord in self.untried_coordinates:
@@ -469,32 +459,130 @@ class AIPlayer(Player):
 
     def _compute_probability_grid(self) -> List[List[int]]:
         """
-        Calcule une grille de probabilités : pour chaque case, le nombre de façons dont un navire restant peut s'y trouver.
+        Calcule une grille de probabilités sophistiquée pour optimiser la recherche de navires.
+        Prend en compte les navires restants, les patterns de tir, et les contraintes géométriques.
         """
         size = self.own_board.size
         prob_grid = [[0 for _ in range(size)] for _ in range(size)]
-        # On considère uniquement les navires non coulés
-        ships_left = [ship for ship in self.ships_to_place if not all(coord in self.sunk_ships_coords for coord in ship.coordinates)]
-        # Cases déjà tirées (toutes les cases de la grille qui ne sont pas '~')
-        forbidden = set()
+        
+        # Obtenir les navires non coulés et leurs tailles
+        ships_left = []
+        for ship in self.ships_to_place:
+            if not ship.is_sunk():
+                ships_left.append(ship.length)
+        
+        # Si aucun navire restant, retourner une grille vide
+        if not ships_left:
+            return prob_grid
+        
+        # Créer un ensemble des cases déjà tirées
+        shot_cells = set()
         for r in range(size):
             for c in range(size):
                 if self.target_board.grid[r][c] != '~':
-                    forbidden.add((r, c))
-        for ship in ships_left:
-            length = ship.length if hasattr(ship, 'length') else len(ship.coordinates)
-            # Horizontal
+                    shot_cells.add((r, c))
+        
+        # Pour chaque navire restant, calculer toutes les positions possibles
+        for ship_length in ships_left:
+            # Positions horizontales
             for r in range(size):
-                for c in range(size - length + 1):
-                    positions = [(r, c + i) for i in range(length)]
-                    if all(self.target_board.grid[x][y] != 'O' and (x, y) not in forbidden for (x, y) in positions):
-                        for (x, y) in positions:
-                            prob_grid[x][y] += 1
-            # Vertical
+                for c in range(size - ship_length + 1):
+                    positions = [(r, c + i) for i in range(ship_length)]
+                    # Vérifier si toutes les positions sont valides
+                    if all(pos not in shot_cells for pos in positions):
+                        # Vérifier qu'aucune position n'est un miss ('O')
+                        if all(self.target_board.grid[pos[0]][pos[1]] != 'O' for pos in positions):
+                            # Augmenter la probabilité pour chaque position
+                            for pos in positions:
+                                prob_grid[pos[0]][pos[1]] += 1
+            
+            # Positions verticales
             for c in range(size):
-                for r in range(size - length + 1):
-                    positions = [(r + i, c) for i in range(length)]
-                    if all(self.target_board.grid[x][y] != 'O' and (x, y) not in forbidden for (x, y) in positions):
-                        for (x, y) in positions:
-                            prob_grid[x][y] += 1
+                for r in range(size - ship_length + 1):
+                    positions = [(r + i, c) for i in range(ship_length)]
+                    # Vérifier si toutes les positions sont valides
+                    if all(pos not in shot_cells for pos in positions):
+                        # Vérifier qu'aucune position n'est un miss ('O')
+                        if all(self.target_board.grid[pos[0]][pos[1]] != 'O' for pos in positions):
+                            # Augmenter la probabilité pour chaque position
+                            for pos in positions:
+                                prob_grid[pos[0]][pos[1]] += 1
+        
+        # Bonus pour les cases adjacentes aux hits (stratégie de ciblage)
+        for r in range(size):
+            for c in range(size):
+                if self.target_board.grid[r][c] == 'X':  # Hit
+                    # Ajouter un bonus aux cases adjacentes
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < size and 0 <= nc < size:
+                            if self.target_board.grid[nr][nc] == '~':  # Case non tirée
+                                prob_grid[nr][nc] += 2  # Bonus pour les cases adjacentes
+        
+        # Pénalité pour les cases isolées (stratégie de parité)
+        for r in range(size):
+            for c in range(size):
+                if prob_grid[r][c] > 0:
+                    # Vérifier si la case est isolée (pas de navire adjacent possible)
+                    isolated = True
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < size and 0 <= nc < size:
+                            if prob_grid[nr][nc] > 0:
+                                isolated = False
+                                break
+                    if isolated:
+                        prob_grid[r][c] = max(0, prob_grid[r][c] - 1)  # Légère pénalité
+        
         return prob_grid
+
+    def _adapt_strategy(self):
+        """
+        Adapte la stratégie de l'IA en fonction de ses performances récentes.
+        """
+        if self.shots_fired < 5:  # Pas assez de données pour adapter
+            return
+        
+        # Calculer le taux de réussite
+        hit_rate = self.hits_achieved / self.shots_fired
+        
+        # Adapter le niveau d'agression
+        if hit_rate < 0.2:  # Performance faible
+            self.aggression_level = min(2.0, self.aggression_level + 0.1)
+            print(f"IA: Performance faible ({hit_rate:.2f}), augmentation de l'agression à {self.aggression_level:.2f}")
+        elif hit_rate > 0.6:  # Performance excellente
+            self.aggression_level = max(0.5, self.aggression_level - 0.05)
+            print(f"IA: Performance excellente ({hit_rate:.2f}), réduction de l'agression à {self.aggression_level:.2f}")
+        
+        # Adapter la préférence de parité
+        if self.consecutive_misses >= 3:
+            self.parity_preference = max(0.5, self.parity_preference - 0.1)
+            print(f"IA: Miss consécutifs, réduction de la préférence de parité à {self.parity_preference:.2f}")
+        elif self.last_shot_result == 'hit':
+            self.parity_preference = min(1.5, self.parity_preference + 0.05)
+            print(f"IA: Hit récent, augmentation de la préférence de parité à {self.parity_preference:.2f}")
+
+    def _get_optimal_parity_coordinates(self) -> List[Tuple[int, int]]:
+        """
+        Retourne les coordonnées optimales basées sur la parité pour maximiser la couverture.
+        Utilise une stratégie en damier optimisée pour trouver les navires plus efficacement.
+        """
+        even_coords = []
+        odd_coords = []
+        
+        for r in range(self.own_board.size):
+            for c in range(self.own_board.size):
+                if (r + c) % 2 == 0:
+                    even_coords.append((r, c))
+                else:
+                    odd_coords.append((r, c))
+        
+        # Filtrer les coordonnées déjà tirées
+        even_available = [coord for coord in even_coords if coord in self.untried_coordinates]
+        odd_available = [coord for coord in odd_coords if coord in self.untried_coordinates]
+        
+        # Retourner la liste avec le plus de coordonnées disponibles
+        if len(even_available) >= len(odd_available):
+            return even_available
+        else:
+            return odd_available
